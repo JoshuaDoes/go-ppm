@@ -10,7 +10,7 @@
 
 ## Dependencies
 
-| [go-adpcm](https://github.com/JoshuaDoes/go-adpcm) |
+| [adpcm](https://github.com/bovarysme/adpcm) |
 
 ## License
 The source code for go-ppm is released under the MIT License. See LICENSE for more details.

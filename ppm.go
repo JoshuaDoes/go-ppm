@@ -22,7 +22,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/JoshuaDoes/go-adpcm"
+	"github.com/bovarysme/adpcm"
 )
 
 var (
@@ -131,10 +131,10 @@ type Offset struct {
 
 type SoundData struct {
 	SoundMeta SoundMeta
-	BGM []int16 // PCM audio
-	SoundEffect1 []int16 // PCM audio
-	SoundEffect2 []int16 // PCM audio
-	SoundEffect3 []int16 // PCM audio
+	BGM []int // PCM audio
+	SoundEffect1 []int // PCM audio
+	SoundEffect2 []int // PCM audio
+	SoundEffect3 []int // PCM audio
 	Size int
 }
 type SoundMeta struct {
@@ -167,7 +167,7 @@ func (ppmData *PPM) Open() (error) {
 
 	audioSize := make([]byte, 4)
 	ppmFile.ReadAt(audioSize, 0x8)
-	ppmData.SoundData.Size = hex2int(audioSize)
+	ppmData.SoundData.Size = hex2int(binaryReadLE(audioSize))
 
 	lockStatus := make([]byte, 2)
 	ppmFile.ReadAt(lockStatus, 0x10)
@@ -347,10 +347,10 @@ func decodeSoundHeader(ppmFile *os.File, ppmData *PPM) {
 	if (soundHeaderOffset % 4) != 0 { soundHeaderOffset += 4 - (soundHeaderOffset % 4) }
 	ppmFile.Seek(int64(soundHeaderOffset), 0)
 	
-	bgmSizeBytes := make([]byte, 8)
-	sec1SizeBytes := make([]byte, 8)
-	sec2SizeBytes := make([]byte, 8)
-	sec3SizeBytes := make([]byte, 8)
+	bgmSizeBytes := make([]byte, 4)
+	sec1SizeBytes := make([]byte, 4)
+	sec2SizeBytes := make([]byte, 4)
+	sec3SizeBytes := make([]byte, 4)
 	ppmFile.Read(bgmSizeBytes)
 	ppmFile.Read(sec1SizeBytes)
 	ppmFile.Read(sec2SizeBytes)
@@ -385,38 +385,29 @@ func decodeSoundHeader(ppmFile *os.File, ppmData *PPM) {
 	ppmData.SoundData.SoundMeta.SoundEffect3.Length = int(sec3Size)
 }
 
-func decodeAudio(ppmFile *os.File, ppmData *PPM, trackOffset uint32, trackLength int) []int16 {
+func decodeAudio(ppmFile *os.File, ppmData *PPM, trackOffset uint32, trackLength int) []int {
 	debugLog("> Decoding track at offset " + strconv.Itoa(int(trackOffset)) + " with length " + strconv.Itoa(trackLength))
+
 	ppmFile.Seek(int64(trackOffset), 0)
-	buffer := make([]uint8, trackLength)
+
+	buffer := make([]byte, trackLength)
+	ppmFile.Read(buffer)
 	for i := 0; i < trackLength; i++ {
-		bytes := make([]byte, 2)
-		ppmFile.Read(bytes)
-		buffer[i] = binaryReadLE_uint8(bytes)
-		//debugLog("Buffer " + strconv.Itoa(i) + ": " + strconv.Itoa(int(buffer[i])))
+		buffer[i] = (buffer[i] & 0xF) << 4 | (buffer[i] >> 4) // Flipnote Studio's adpcm data uses reverse nibble order
 	}
-	return adpcm.DecodeAdpcm(buffer)
+	audio := make([]int, 0)
+	decoder := adpcm.NewDecoder(1)
+	decoder.Decode(buffer, &audio)
+	return audio
 }
 
 func decodeSoundFlags(ppmFile *os.File, ppmData *PPM) [][3]byte {
 	ppmFile.Seek(int64(0x06A0 + ppmData.FrameData.Size), 0)
-	/*
-		decodeSoundFlags() {
-			this.seek(0x06A0 + this._frameDataLength);
-			// per msdn docs - the array map callback is only invoked for array indicies that have assigned values
-			// so when we create an array, we need to fill it with something before we can map over it
-			var arr = new Array(this.frameCount).fill([]);
-			return arr.map(value => {
-				var byte = this.readUint8();
-				return [byte & 0x1, (byte >> 1) & 0x1, (byte >> 2) & 0x1];
-			});
-		}
-	*/
 	array := make([][3]byte, ppmData.FrameData.FrameCount)
 	for i := 0; i < ppmData.FrameData.FrameCount; i++ {
 		newByteBytes := make([]byte, 2)
 		ppmFile.Read(newByteBytes)
-		newByte := hex2uint8(newByteBytes)
+		newByte := binaryReadLE_uint8(newByteBytes)
 		array[i][0] = newByte & 0x1
 		array[i][1] = (newByte >> 1) & 0x1
 		array[i][2] = (newByte >> 2) & 0x1
